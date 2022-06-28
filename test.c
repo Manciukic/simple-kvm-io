@@ -134,6 +134,40 @@ int vcpu_create(struct vm *vm, struct kvm_run **r)
   return fd;
 }
 
+int dump_registers(int fd) {
+  struct kvm_regs regs;
+  int res;
+
+  res = ioctl(fd, KVM_GET_REGS, &regs);
+  if (res < 0) {
+    perror("ioctl(KVM_GET_SREGS)");
+
+    return -1;
+  }
+
+  printf("rax: %llx\n", regs.rax);
+  printf("rbx: %llx\n", regs.rbx);
+  printf("rcx: %llx\n", regs.rcx);
+  printf("rdx: %llx\n", regs.rdx);
+  printf("rsi: %llx\n", regs.rsi);
+  printf("rdi: %llx\n", regs.rdi);
+  printf("rsp: %llx\n", regs.rsp);
+  printf("rbp: %llx\n", regs.rbp);
+  printf("r8: %llx\n", regs.r8);
+  printf("r9: %llx\n", regs.r9);
+  printf("r10: %llx\n", regs.r10);
+  printf("r11: %llx\n", regs.r11);
+  printf("r12: %llx\n", regs.r12);
+  printf("r13: %llx\n", regs.r13);
+  printf("r14: %llx\n", regs.r14);
+  printf("r15: %llx\n", regs.r15);
+  printf("rip: %llx\n", regs.rip);
+  printf("rflags: %llx\n", regs.rflags);
+  fflush(stdout);
+
+  return 0;
+}
+
 int vm_run(int fd, struct kvm_run *r)
 {
   struct kvm_regs regs;
@@ -348,6 +382,7 @@ int main()
   res = vm_run(vcpu_fd, r);
   if (res != 1) {
     printf("Error: run returned %d\n", res);
+    dump_registers(vcpu_fd);
 
     return -1;
   }
