@@ -53,7 +53,8 @@ int guest_mem_init(struct vm *vm, int mem_size)
   struct kvm_userspace_memory_region region;
   int res;
 
-  vm->mem = aligned_alloc(mem_size, 4096);
+  vm->mem = mmap(0, mem_size, PROT_READ|PROT_WRITE,
+                   MAP_SHARED|MAP_ANONYMOUS, -1, 0);
   if (vm->mem == NULL) {
     perror("MAlloc(VM Mem)");
 
