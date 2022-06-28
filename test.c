@@ -12,7 +12,7 @@
 #include "cpu.h"
 #include "pd.h"
 
-extern const uint8_t guest[], guest_end[];
+const char guest_fname[] = "guest.flat";
 
 struct vm {
   int fd;
@@ -275,6 +275,9 @@ int registers_setup(int fd)
 
 int guest_config(struct vm *vm, int fd)
 {
+  FILE *guest_file;
+  int guest_size;
+  void *guest;
 
   printf("\t- Setting up system registers\n");
   fflush(stdout);
@@ -288,9 +291,28 @@ int guest_config(struct vm *vm, int fd)
     return -10;
   }
 
+  printf("\t- Loading guest memory\n");
+  fflush(stdout);
+  printf("\t\t- Opening file\n");
+  fflush(stdout);
+  guest_file = fopen(guest_fname, "r");
+  if (guest_file == NULL) {
+    perror("Cannot open guest memory file");
+  }
+
+  printf("\t\t- Getting file size\n");
+  fflush(stdout);
+  fseek(guest_file, 0, SEEK_END); // seek to end of file
+  guest_size = ftell(guest_file); // get current file pointer
+  fseek(guest_file, 0, SEEK_SET); // seek back to beginning of file
+
+  printf("\t\t- mmap-ing file\n");
+  fflush(stdout);
+  guest = mmap(NULL, guest_size, PROT_READ, MAP_SHARED, fileno(guest_file), 0);
+
   printf("\t- Copying the guest to its memory\n");
   fflush(stdout);
-  memcpy(vm->mem, guest, guest_end - guest);
+  memcpy(vm->mem, guest, guest_size);
 
   return 0;
 }

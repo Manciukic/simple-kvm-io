@@ -1,14 +1,17 @@
-CFLAGS = -Wall -Wextra -Werror -O0 -g
+CFLAGS = -Wall -Wextra -Werror -O0 -g 
 
-test: test.o payload.o
-	$(CC) $^ -o $@
+test: test.o guest.flat
+	$(CC) test.o -o $@
+
+guest.flat: payload.o
+	objcopy -O binary $^ $@
 
 payload.o: payload.ld guest.o
-	$(LD) -T $< -r -o $@
+	$(LD) -T $< -o $@
 
 guest.o: guest.s
 	$(CC) -c guest.s -o $@
 
 clean:
-	$(RM) test *.o *.img
+	$(RM) test *.o *.img *.flat
 
