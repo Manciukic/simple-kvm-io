@@ -4,7 +4,7 @@ test: test.o payload.o
 	$(CC) $^ -o $@
 
 payload.o: payload.ld guest.o
-	$(LD) -T $< -o $@
+	$(LD) -T $< -r -o $@
 
 guest.o: guest.s
 	$(CC) -c guest.s -o $@
