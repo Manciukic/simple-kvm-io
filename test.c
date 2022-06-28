@@ -1,0 +1,333 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <string.h>
+#include <stdint.h>
+#include <linux/kvm.h>
+
+#include "cpu.h"
+#include "pd.h"
+
+extern const uint8_t guest[], guest_end[];
+
+struct vm {
+  int fd;
+  int vcpu_mmap_size;
+  uint8_t *mem;
+};
+
+int kvm_open(void)
+{
+  int kvm_fd;
+  int api_ver;
+
+  kvm_fd = open("/dev/kvm", O_RDWR);
+  if (kvm_fd < 0) {
+    perror("open(/dev/kvm)");
+
+    return -1;
+  }
+
+  api_ver = ioctl(kvm_fd, KVM_GET_API_VERSION, 0);
+  if (api_ver < 0) {
+    perror("ioctl(KVM_GET_API_VERSION)");
+
+    return -2;
+  }
+
+  if (api_ver != KVM_API_VERSION) {
+    fprintf(stderr, "Got KVM api version %d, expected %d\n", api_ver, KVM_API_VERSION);
+
+    return -3;
+  }
+
+  return kvm_fd;
+}
+
+int guest_mem_init(struct vm *vm, int mem_size)
+{
+  struct kvm_userspace_memory_region region;
+  int res;
+
+  vm->mem = aligned_alloc(mem_size, 4096);
+  if (vm->mem == NULL) {
+    perror("MAlloc(VM Mem)");
+
+    return -1;
+  }
+  printf("\tAllocated guest memory (size %x) at %p\n", mem_size, vm->mem);
+
+  region.slot = 0;
+  region.flags = 0;
+  region.guest_phys_addr = 0;
+  region.memory_size = mem_size;
+  region.userspace_addr = (unsigned long)vm->mem;
+  res = ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, &region);
+  if (res < 0) {
+    perror("ioctl(KVM_SET_USER_MEMORY_REGION)");
+
+    return -2;
+  }
+
+  return 0;
+}
+
+struct vm *vm_create(int mem_size)
+{
+  int kvm_fd;
+  struct vm *vm;
+
+  kvm_fd = kvm_open();
+  if (kvm_fd < 0) {
+    return NULL;
+  }
+
+  vm = malloc(sizeof(struct vm));
+  if (vm == NULL) {
+    perror("MAlloc(vm)");
+
+    return NULL;
+  }
+  vm->fd = ioctl(kvm_fd, KVM_CREATE_VM, 0);
+  if (vm->fd < 0) {
+    perror("ioctl(KVM_CREATE_VM)");
+
+    return NULL;
+  }
+  vm->vcpu_mmap_size = ioctl(kvm_fd, KVM_GET_VCPU_MMAP_SIZE, 0);
+  if (vm->vcpu_mmap_size <= 0) {
+    perror("ioctl(KVM_GET_VCPU_MMAP_SIZE)");
+
+    return NULL;
+  }
+
+  if (guest_mem_init(vm, mem_size) < 0) {
+    return NULL;
+  }
+
+  return vm;
+}
+
+int vcpu_create(struct vm *vm, struct kvm_run **r)
+{
+  int fd;
+
+  fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
+  if (fd < 0) {
+    perror("ioctl(KVM_CREATE_VCPU)");
+
+    return -1;
+  }
+
+  *r = mmap(NULL, vm->vcpu_mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (r == MAP_FAILED) {
+    perror("mmap kvm_run");
+
+    return -3;
+  }
+
+  return fd;
+}
+
+int vm_run(int fd, struct kvm_run *r)
+{
+  struct kvm_regs regs;
+  int res;
+
+  for (;;) {
+    res = ioctl(fd, KVM_RUN, 0);
+    if (res < 0) {
+      perror("ioctl(KVM_RUN)");
+
+      return -1;
+    }
+
+    switch (r->exit_reason) {
+      case KVM_EXIT_HLT:
+        res = ioctl(fd, KVM_GET_REGS, &regs);
+        if (res < 0) {
+          perror("ioctl(KVM_GET_REGS)");
+
+          return -1;
+	}
+
+	printf("EAX: %llx\n", regs.rax); 
+	printf("EDX: %llx\n", regs.rdx); 
+
+	return 1;
+      default:
+        fprintf(stderr,	"VM Exit reason: %d, expected KVM_EXIT_HLT (%d)\n",
+                        r->exit_reason, KVM_EXIT_HLT);
+
+        return -1;
+    }
+  }
+}
+
+static void setup_64bit_code_segment(struct kvm_sregs *sregs)
+{
+  struct kvm_segment seg = {
+    .base = 0,
+    .limit = 0xffffffff,
+    .selector = 1 << 3,
+    .present = 1,
+    .type = 11, /* Code: execute, read, accessed */
+    .dpl = 0,
+    .db = 0,
+    .s = 1, /* Code/data */
+    .l = 1,
+    .g = 1, /* 4KB granularity */
+  };
+
+  printf("\t\t\t- Setting CS\n");
+  fflush(stdout);
+  sregs->cs = seg;
+
+  seg.type = 3; /* Data: read/write, accessed */
+  seg.selector = 2 << 3;
+  printf("\t\t\t- Setting {D,E,F,G,S}S\n");
+  fflush(stdout);
+  sregs->ds = sregs->es = sregs->fs = sregs->gs = sregs->ss = seg;
+}
+
+static int system_registers_setup(struct vm *vm, int fd)
+{
+  int res;
+  struct kvm_sregs sregs;
+
+  printf("\t\t- Reading system registers\n");
+  fflush(stdout);
+  res = ioctl(fd, KVM_GET_SREGS, &sregs);
+  if (res < 0) {
+    perror("ioctl(KVM_GET_SREGS)");
+
+    return -1;
+  }
+
+
+  printf("\t\t- Setting up page tables...\n");
+  fflush(stdout);
+  uint64_t pml4_addr = 0x2000;
+  uint64_t *pml4 = (uint64_t *)(vm->mem + pml4_addr);
+
+  uint64_t pdpt_addr = 0x3000;
+  uint64_t *pdpt = (uint64_t *)(vm->mem + pdpt_addr);
+
+  uint64_t pd_addr = 0x4000;
+  uint64_t *pd = (uint64_t *)(vm->mem + pd_addr);
+
+
+  printf("\t\t\t- PML4[0] %p (%p)...\n", pml4, vm->mem);
+  fflush(stdout);
+  pml4[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_addr;
+  printf("\t\t\t- PDPT[0] %p (%p)...\n", pdpt, vm->mem);
+  fflush(stdout);
+  pdpt[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pd_addr;
+  printf("\t\t\t- PD[0]...\n");
+  fflush(stdout);
+  pd[0]   = PDE64_PRESENT | PDE64_RW | PDE64_USER | PDE64_PS;
+
+  printf("\t\t- Setting up CR* and EFER...\n");
+  fflush(stdout);
+  sregs.cr3 = pml4_addr;
+  sregs.cr4 = CR4_PAE;
+  sregs.cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
+  sregs.efer  = EFER_LME | EFER_LMA;
+
+  setup_64bit_code_segment(&sregs);
+
+  printf("\t\t- Writing back system registers\n");
+  fflush(stdout);
+  res = ioctl(fd, KVM_SET_SREGS, &sregs);
+  if (res < 0) {
+    perror("ioctl(KVM_SET_SREGS)");
+
+    return -2;
+  }
+
+  return 0;
+}
+
+int registers_setup(int fd)
+{
+  int res;
+  struct kvm_regs regs;
+
+  memset(&regs, 0, sizeof(struct kvm_regs));
+  /* Bit 1 in the rflags register must be always set. Clear all the other bits */
+  regs.rflags = 2;
+  /* The stack is at top 2 MB and grows down */
+  regs.rsp    = 2 << 20;
+
+  res = ioctl(fd, KVM_SET_REGS, &regs);
+  if (res < 0) {
+    perror("ioctl(KVM_SET_REGS)");
+
+    return -1;
+  }
+
+  return 0;
+}
+
+int guest_config(struct vm *vm, int fd)
+{
+
+  printf("\t- Setting up system registers\n");
+  fflush(stdout);
+  if (system_registers_setup(vm, fd) < 0) {
+    return -9;
+  }
+
+  printf("\t- Setting up user registers\n");
+  fflush(stdout);
+  if (registers_setup(fd) < 0) {
+    return -10;
+  }
+
+  printf("\t- Copying the guest to its memory\n");
+  fflush(stdout);
+  memcpy(vm->mem, guest, guest_end - guest);
+
+  return 0;
+}
+
+
+int main()
+{
+  int res;
+  int vcpu_fd;
+  struct vm *vm;
+  struct kvm_run *r;
+
+  printf("Simple kvm test...\n");
+  fflush(stdout);
+  vm = vm_create(0x200000);
+  if (vm == NULL) {
+    return -1;
+  }
+  printf("Creating VCPU...\n");
+  fflush(stdout);
+  vcpu_fd = vcpu_create(vm, &r);
+
+  printf("Configuring the guest...\n");
+  fflush(stdout);
+  res = guest_config(vm, vcpu_fd);
+  if (res < 0) {
+    return -1;
+  }
+
+  printf("And running it!\n");
+  fflush(stdout);
+  res = vm_run(vcpu_fd, r);
+  if (res != 1) {
+    printf("Error: run returned %d\n", res);
+
+    return -1;
+  }
+
+  return 0;
+}
