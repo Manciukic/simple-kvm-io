@@ -134,6 +134,20 @@ int vcpu_create(struct vm *vm, struct kvm_run **r)
   return fd;
 }
 
+#define SERIAL_PORT 0x10
+
+int handle_serial(struct kvm_run *r) {
+  char *data = (char*) r + r->io.data_offset;
+
+  if (r->io.direction != KVM_EXIT_IO_OUT)
+    return -1;
+
+  for (unsigned i = 0; i <  r->io.size * r->io.count; i++)
+    putc(data[i], stdout);
+
+  return 0;
+}
+
 int dump_registers(int fd) {
   struct kvm_regs regs;
   int res;
@@ -188,12 +202,27 @@ int vm_run(int fd, struct kvm_run *r)
           perror("ioctl(KVM_GET_REGS)");
 
           return -1;
-	}
+        }
 
-	printf("EAX: %llx\n", regs.rax); 
-	printf("EDX: %llx\n", regs.rdx); 
+        printf("EAX: %llx\n", regs.rax);
+        printf("EDX: %llx\n", regs.rdx);
 
-	return 1;
+        return 1;
+      case KVM_EXIT_IO:
+        switch (r->io.port) {
+          case SERIAL_PORT:
+            res = handle_serial(r);
+            if (res < 0)
+              return res;
+            continue;
+          default:
+            printf("No handler defined for: "
+                   "direction=%d "
+                   "port=%x "
+                   "size=%d\n",
+                    r->io.direction, r->io.port, r->io.size);
+            return -1;
+        }
       default:
         fprintf(stderr,	"VM Exit reason: %d, expected KVM_EXIT_HLT (%d)\n",
                         r->exit_reason, KVM_EXIT_HLT);
