@@ -14,11 +14,17 @@
 #include "host_io.h"
 
 const char guest_fname[] = "guest.flat";
+const char hdd_fname[] = "disk.raw";
+
+struct vm_mem {
+  uint8_t *addr;
+  size_t size;
+};
 
 struct vm {
   int fd;
   int vcpu_mmap_size;
-  uint8_t *mem;
+  struct vm_mem mem;
 };
 
 int kvm_open(void)
@@ -54,20 +60,21 @@ int guest_mem_init(struct vm *vm, int mem_size)
   struct kvm_userspace_memory_region region;
   int res;
 
-  vm->mem = mmap(0, mem_size, PROT_READ|PROT_WRITE,
+  vm->mem.addr = mmap(0, mem_size, PROT_READ|PROT_WRITE,
                    MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-  if (vm->mem == NULL) {
+  if (vm->mem.addr == NULL) {
     perror("MAlloc(VM Mem)");
 
     return -1;
   }
-  printf("\tAllocated guest memory (size %x) at %p\n", mem_size, vm->mem);
-
+  vm->mem.size = mem_size;
+  printf("\tAllocated guest memory (size %lx) at %p\n",
+        vm->mem.size, vm->mem.addr);
   region.slot = 0;
   region.flags = 0;
   region.guest_phys_addr = 0;
-  region.memory_size = mem_size;
-  region.userspace_addr = (unsigned long)vm->mem;
+  region.memory_size = vm->mem.size;
+  region.userspace_addr = (unsigned long)vm->mem.addr;
   res = ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, &region);
   if (res < 0) {
     perror("ioctl(KVM_SET_USER_MEMORY_REGION)");
@@ -169,7 +176,7 @@ int dump_registers(int fd) {
   return 0;
 }
 
-int vm_run(int fd, struct kvm_run *r)
+int vm_run(int fd, struct kvm_run *r, struct vm_mem *mem, struct hdd *h)
 {
   struct kvm_regs regs;
   int res;
@@ -199,6 +206,13 @@ int vm_run(int fd, struct kvm_run *r)
         switch (r->io.port) {
           case SERIAL_PORT:
             res = handle_serial(r);
+            if (res < 0)
+              return res;
+            continue;
+          case HDD_CMD_PORT:
+          case HDD_DMA_ADDR_PORT:
+          case HDD_SECTOR_PORT:
+            res = handle_hdd(h, r, mem->addr, mem->size);
             if (res < 0)
               return res;
             continue;
@@ -263,19 +277,19 @@ static int system_registers_setup(struct vm *vm, int fd)
   printf("\t\t- Setting up page tables...\n");
   fflush(stdout);
   uint64_t pml4_addr = 0x2000;
-  uint64_t *pml4 = (uint64_t *)(vm->mem + pml4_addr);
+  uint64_t *pml4 = (uint64_t *)(vm->mem.addr + pml4_addr);
 
   uint64_t pdpt_addr = 0x3000;
-  uint64_t *pdpt = (uint64_t *)(vm->mem + pdpt_addr);
+  uint64_t *pdpt = (uint64_t *)(vm->mem.addr + pdpt_addr);
 
   uint64_t pd_addr = 0x4000;
-  uint64_t *pd = (uint64_t *)(vm->mem + pd_addr);
+  uint64_t *pd = (uint64_t *)(vm->mem.addr + pd_addr);
 
 
-  printf("\t\t\t- PML4[0] %p (%p)...\n", pml4, vm->mem);
+  printf("\t\t\t- PML4[0] %p (%p)...\n", pml4, vm->mem.addr);
   fflush(stdout);
   pml4[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_addr;
-  printf("\t\t\t- PDPT[0] %p (%p)...\n", pdpt, vm->mem);
+  printf("\t\t\t- PDPT[0] %p (%p)...\n", pdpt, vm->mem.addr);
   fflush(stdout);
   pdpt[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pd_addr;
   printf("\t\t\t- PD[0]...\n");
@@ -324,9 +338,36 @@ int registers_setup(int fd)
   return 0;
 }
 
+static int mmap_file(const char *fname, void **addr, const char *modes) {
+  FILE *file;
+  int size, prot = 0;
+
+  file = fopen(fname, modes);
+  if (file == NULL) {
+    perror("Cannot open file");
+    return -1;
+  }
+
+  fseek(file, 0, SEEK_END); // seek to end of file
+  size = ftell(file); // get current file pointer
+  fseek(file, 0, SEEK_SET); // seek back to beginning of file
+
+  if (strcmp(modes, "r") == 0)
+    prot = PROT_READ;
+  if (strcmp(modes, "r+") == 0)
+    prot = PROT_READ | PROT_WRITE;
+
+  *addr = mmap(NULL, size, prot, MAP_SHARED, fileno(file), 0);
+  if (*addr == MAP_FAILED) {
+    perror("mmap_file");
+    return -1;
+  }
+
+  return size;
+}
+
 int guest_config(struct vm *vm, int fd)
 {
-  FILE *guest_file;
   int guest_size;
   void *guest;
 
@@ -344,30 +385,33 @@ int guest_config(struct vm *vm, int fd)
 
   printf("\t- Loading guest memory\n");
   fflush(stdout);
-  printf("\t\t- Opening file\n");
-  fflush(stdout);
-  guest_file = fopen(guest_fname, "r");
-  if (guest_file == NULL) {
-    perror("Cannot open guest memory file");
-  }
-
-  printf("\t\t- Getting file size\n");
-  fflush(stdout);
-  fseek(guest_file, 0, SEEK_END); // seek to end of file
-  guest_size = ftell(guest_file); // get current file pointer
-  fseek(guest_file, 0, SEEK_SET); // seek back to beginning of file
-
-  printf("\t\t- mmap-ing file\n");
-  fflush(stdout);
-  guest = mmap(NULL, guest_size, PROT_READ, MAP_SHARED, fileno(guest_file), 0);
+  guest_size = mmap_file(guest_fname, &guest, "r");
+  if (guest_size < 0)
+    return -1;
 
   printf("\t- Copying the guest to its memory\n");
   fflush(stdout);
-  memcpy(vm->mem, guest, guest_size);
+  memcpy(vm->mem.addr, guest, guest_size);
 
   return 0;
 }
 
+static struct hdd *setup_hdd(const char *fname) {
+  struct hdd *h = (struct hdd*) calloc(1, sizeof(struct hdd));
+  int res;
+
+  res = mmap_file(fname, &h->disk_addr, "r+");
+  if (res < 0)
+    return NULL;
+  h->size = res;
+
+  if (h->size % HDD_SECTOR_SIZE != 0) {
+    printf("disk must be a multiple of %d in size ", HDD_SECTOR_SIZE);
+    return NULL;
+  }
+
+  return h;
+}
 
 int main()
 {
@@ -375,6 +419,7 @@ int main()
   int vcpu_fd;
   struct vm *vm;
   struct kvm_run *r;
+  struct hdd* h;
 
   printf("Simple kvm test...\n");
   fflush(stdout);
@@ -393,9 +438,16 @@ int main()
     return -1;
   }
 
+  printf("Configuring the disk...\n");
+  fflush(stdout);
+  h = setup_hdd(hdd_fname);
+  if (h == NULL) {
+    return -1;
+  }
+
   printf("And running it!\n");
   fflush(stdout);
-  res = vm_run(vcpu_fd, r);
+  res = vm_run(vcpu_fd, r, &vm->mem, h);
   if (res != 1) {
     printf("Error: run returned %d\n", res);
     dump_registers(vcpu_fd);

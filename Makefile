@@ -23,3 +23,6 @@ guest.o: guest.c
 
 clean:
 	$(RM) test *.o *.img *.flat
+
+disk:
+	dd if=/dev/zero of=disk.raw bs=512 count=16
