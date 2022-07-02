@@ -1,21 +1,25 @@
 CFLAGS = -Wall -Wextra -Werror -O0 -g
+GUEST_CFLAGS = -nostdinc -fno-builtin
 
-test: test.o guest.flat
-	$(CC) test.o -o $@
+all: test guest.flat
+
+test: test.o host_io.o
+	$(CC) $^ -o $@
 
 guest.flat: payload.o
 	objcopy -O binary $^ $@
 
-payload.o: payload.ld guest.o guest_load.o
+payload.o: payload.ld guest.o guest_load.o guest_io.o
 	$(LD) -T $< -o $@
 
 guest_load.o: guest_load.s
 	$(CC) -c $^ -o $@
 
-guest.o: guest.c
-	$(CC) -nostdinc -fno-builtin -c $^ -o $@
+guest_io.o: guest_io.c
+	$(CC) $(GUEST_CFLAGS) -c $^ -o $@
 
+guest.o: guest.c
+	$(CC) $(GUEST_CFLAGS) -c $^ -o $@
 
 clean:
 	$(RM) test *.o *.img *.flat
-

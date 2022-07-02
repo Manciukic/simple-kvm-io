@@ -11,6 +11,7 @@
 
 #include "cpu.h"
 #include "pd.h"
+#include "host_io.h"
 
 const char guest_fname[] = "guest.flat";
 
@@ -132,20 +133,6 @@ int vcpu_create(struct vm *vm, struct kvm_run **r)
   }
 
   return fd;
-}
-
-#define SERIAL_PORT 0x10
-
-int handle_serial(struct kvm_run *r) {
-  char *data = (char*) r + r->io.data_offset;
-
-  if (r->io.direction != KVM_EXIT_IO_OUT)
-    return -1;
-
-  for (unsigned i = 0; i <  r->io.size * r->io.count; i++)
-    putc(data[i], stdout);
-
-  return 0;
 }
 
 int dump_registers(int fd) {
