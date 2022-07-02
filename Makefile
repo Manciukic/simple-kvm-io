@@ -25,4 +25,8 @@ clean:
 	$(RM) test *.o *.img *.flat
 
 disk:
+	rm -f disk.raw
 	dd if=/dev/zero of=disk.raw bs=512 count=16
+
+run: clean disk all
+	./test
