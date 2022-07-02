@@ -1,6 +1,18 @@
 # Simple KVM IO
 
-Usage:
+Small hands-on project for the class in Advanced OS at Scuola Superiore
+Sant'Anna held by Prof. L. Abeni [1].
+The project expands a "hello world" example for KVM virtualization [2] by adding
+two simple I/O devices: a serial port, and a simple "disk".
+Other improvements over the starting example are:
+ - guest code is loaded from file
+ - fix bug in guest memory allocation (`aligned_alloc` arguments are swapped!)
+ - guest code is compiled from C
+
+[1] http://retis.santannapisa.it/luca/SOAvanzati/
+[2] http://retis.santannapisa.it/luca/SOAvanzati/Src/kvm-test.tgz
+
+## Usage
 ```
 make # compiles the code
 make disk # creates empty disk (8KiB)
