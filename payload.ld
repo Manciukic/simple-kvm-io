@@ -1,8 +1,7 @@
 SECTIONS
 {
         .payload64 0 : {
-                guest = .;
+                guest_load.o
                 guest.o
-                guest_end = .;
         }
 }
