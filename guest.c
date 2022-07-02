@@ -1,6 +1,14 @@
 #include "guest_io.h"
 
-const char LOREM_IPSUM[HDD_SECTOR_SIZE] = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam eget ex in nibh convallis ultrices non non turpis. Pellentesque ultrices at mi nec porta. Phasellus malesuada mi sapien, ac varius ligula sodales eu. Praesent bibendum nisi ut nisl volutpat, non vulputate erat ornare. Proin nec dignissim dolor. Donec fringilla nisi in pulvinar facilisis. Aenean a tellus ut lorem sollicitudin aliquet id sit amet tortor. In non semper orci. Etiam suscipit, lacus at facilisis gravida, ipsum lectus aliquet sapien.";
+const char LOREM_IPSUM[HDD_SECTOR_SIZE] =
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam eget ex "
+    "in nibh convallis ultrices non non turpis. Pellentesque ultrices at mi "
+    "nec porta. Phasellus malesuada mi sapien, ac varius ligula sodales eu. "
+    "Praesent bibendum nisi ut nisl volutpat, non vulputate erat ornare. Proin "
+    "nec dignissim dolor. Donec fringilla nisi in pulvinar facilisis. Aenean a "
+    "tellus ut lorem sollicitudin aliquet id sit amet tortor. In non semper "
+    "orci. Etiam suscipit, lacus at facilisis gravida, ipsum lectus aliquet "
+    "sapien.";
 
 int test_lorem_ipsum(volatile struct hdd_status *h, int offset, int size) {
     char *buf = malloc(size);
@@ -47,8 +55,7 @@ int test_lorem_ipsum(volatile struct hdd_status *h, int offset, int size) {
     puts("\n");
 
     puts("peek buf[:11]: ");
-    for (int i = 0; i < 11; i++)
-        putc(buf[i]);
+    for (int i = 0; i < 11; i++) putc(buf[i]);
     puts("\n");
 
     puts("validating read... ");
@@ -57,7 +64,8 @@ int test_lorem_ipsum(volatile struct hdd_status *h, int offset, int size) {
     for (int i = 0; i < size; i++) {
         if (buf[i] != LOREM_IPSUM[i % HDD_SECTOR_SIZE]) {
             res = 1;
-            puts("ERROR\n"
+            puts(
+                "ERROR\n"
                 "Offset: ");
             puti(i);
             puts("\nExpected: ");
@@ -74,18 +82,19 @@ int test_lorem_ipsum(volatile struct hdd_status *h, int offset, int size) {
     return res;
 }
 
-#define EXPECT(expected, actual) do { \
-    puts(__func__); \
-    if ((expected) != (actual)) { \
-        puts(" ERROR "); \
-        puti(actual); \
-        puts(" != "); \
-        puti(expected); \
-        puts("\n\n"); \
-    } else { \
-        puts(" OK\n\n"); \
-    } \
-} while(0);
+#define EXPECT(expected, actual)      \
+    do {                              \
+        puts(__func__);               \
+        if ((expected) != (actual)) { \
+            puts(" ERROR ");          \
+            puti(actual);             \
+            puts(" != ");             \
+            puti(expected);           \
+            puts("\n\n");             \
+        } else {                      \
+            puts(" OK\n\n");          \
+        }                             \
+    } while (0);
 
 void test_lorem_ipsum_first_sector_aligned(volatile struct hdd_status *h) {
     int res = test_lorem_ipsum(h, 0, HDD_SECTOR_SIZE);
