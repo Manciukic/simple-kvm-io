@@ -1,4 +1,4 @@
-# Simple KVM IO
+# Simple KVM I/O
 
 Small hands-on project for the class in Advanced OS at Scuola Superiore
 Sant'Anna held by Prof. L. Abeni [1].
@@ -9,15 +9,20 @@ Other improvements over the starting example are:
  - fix bug in guest memory allocation (`aligned_alloc` arguments are swapped!)
  - guest code is compiled from C
 
+By compiling with `MMIO=true` you can use memory-mapped I/O instead of port I/O.
+
 [1] http://retis.santannapisa.it/luca/SOAvanzati/
 [2] http://retis.santannapisa.it/luca/SOAvanzati/Src/kvm-test.tgz
 
 ## Usage
+
 ```
-make # compiles the code
+make      # compiles the code (port I/O)
+# or `make MMIO=true`
+
 make disk # creates empty disk (8KiB)
 
-./test # runs hypervisor and guest
+./test    # runs hypervisor and guest
 ```
 
 ## Specification

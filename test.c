@@ -3,6 +3,7 @@
 #include <linux/kvm.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -199,6 +200,27 @@ int vm_run(int fd, struct kvm_run *r, struct vm_mem *mem, struct hdd *h) {
                 printf("EDX: %llx\n", regs.rdx);
 
                 return 1;
+            case KVM_EXIT_MMIO:
+                if (!r->mmio.is_write) {
+                    printf("Unhandled MMIO read request!\n");
+                    return -1;
+                }
+
+                // emulate a normal io out, so that I don't need to rewrite the
+                // functions
+                __u64 phys_addr = r->mmio.phys_addr;
+                __u32 len = r->mmio.len;
+                // copy the data in the unused space after the io struct
+                int data_offset = offsetof(struct kvm_run, io) + sizeof(r->io);
+                __u8 *data = (__u8*) r + data_offset;
+
+                memcpy(data, r->mmio.data, 8);
+                r->io.count = 1;
+                r->io.data_offset = data_offset;
+                r->io.direction = KVM_EXIT_IO_OUT;
+                r->io.port = (phys_addr - MMIO_ADDR) / 8;
+                r->io.size = len;
+                // fall through
             case KVM_EXIT_IO:
                 switch (r->io.port) {
                     case SERIAL_PORT:
@@ -285,10 +307,13 @@ static int system_registers_setup(struct vm *vm, int fd) {
     printf("\t\t\t- PDPT[0] %p (%p)...\n", pdpt, vm->mem.addr);
     fflush(stdout);
     pdpt[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pd_addr;
-    printf("\t\t\t- PD[0]...\n");
+    printf("\t\t\t- PD[0,1]...\n");
     fflush(stdout);
     pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | PDE64_PS;
-
+    // io mem has cache disabled
+    pd[1] = PDE64_PRESENT | PDE64_RW | PDE64_USER
+            | PDE64_PWT | PDE64_PCD |  PDE64_PS
+            | MMIO_ADDR; // io mem is 0x200000-0x3fffff
     printf("\t\t- Setting up CR* and EFER...\n");
     fflush(stdout);
     sregs.cr3 = pml4_addr;

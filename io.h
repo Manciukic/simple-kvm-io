@@ -1,3 +1,5 @@
+#define MMIO_ADDR 0x200000
+
 #define SERIAL_PORT 0x10
 
 #define HDD_SECTOR_PORT 0x20

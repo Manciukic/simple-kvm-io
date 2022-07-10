@@ -4,6 +4,18 @@
 
 void *heap_p = (void *)(1 << 20);  // start heap at 1MB and grow up
 
+#ifdef USE_MMIO
+
+static void outb(const char b, const ioport port) {
+    *(char*)((unsigned long)(MMIO_ADDR+port*8)) = b;
+}
+
+static void outl(const int l, const ioport port) {
+    *(int*)((unsigned long)(MMIO_ADDR+port*8)) = l;
+}
+
+#else
+
 static void outb(const char b, const ioport port) {
     asm("outb %0, %1"
         :  // no output operand
@@ -15,6 +27,8 @@ static void outl(const int l, const ioport port) {
         :  // no output operand
         : "r"(l), "r"(port));
 }
+
+#endif
 
 void memcpy(char *dest, const char *src, unsigned size) {
     for (unsigned i = 0; i < size; i++) {

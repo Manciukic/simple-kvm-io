@@ -1,6 +1,10 @@
 CFLAGS = -Wall -Wextra -Werror -O0 -g
 GUEST_CFLAGS = -nostdinc -fno-builtin -ffreestanding
 
+ifdef MMIO
+GUEST_CFLAGS += -DUSE_MMIO
+endif
+
 all: test guest.flat
 
 test: test.o host_io.o

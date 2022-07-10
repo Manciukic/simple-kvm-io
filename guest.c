@@ -140,7 +140,13 @@ void main() {
     volatile struct hdd_status h;
     int res;
 
-    puts("Hello world!\n");
+    puts("Hello world! I'm using ");
+#ifdef USE_MMIO
+    puts("MMIO");
+#else
+    puts("PIO");
+#endif
+    puts("\n");
 
     res = hdd_setup(&h);
     if (res) {
