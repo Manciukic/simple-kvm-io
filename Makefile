@@ -1,5 +1,5 @@
 CFLAGS = -Wall -Wextra -Werror -O0 -g
-GUEST_CFLAGS = -nostdinc -fno-builtin
+GUEST_CFLAGS = -nostdinc -fno-builtin -ffreestanding
 
 all: test guest.flat
 
